@@ -12,14 +12,24 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = new URL('./entry.png', import.meta.url);
+const encodedSource = new URL('./entry.png.b64', import.meta.url);
+
+// The PNG may have to travel as entry.png.b64 (base64 text) when the binary
+// itself cannot ride along — for instance a text-only push to the repository
+// host. In that case decode it back to the exact original bytes here and run
+// the same validation over the decoded bytes before anything is copied out.
+let decoded: Buffer | null = null;
+if (!existsSync(source) && existsSync(encodedSource)) {
+  decoded = Buffer.from(readFileSync(encodedSource, 'utf8').trim(), 'base64');
+}
 
 // Validate entry.png before copying: it must be a real PNG whose IHDR chunk
 // declares exactly 1024x1024 pixels, as the competition gate requires.
-const bytes = readFileSync(source);
+const bytes = decoded ?? readFileSync(source);
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 function fail(message: string): never {
@@ -45,4 +55,9 @@ if (width !== 1024 || height !== 1024) {
   fail(`IHDR dimensions are ${width}x${height}, expected exactly 1024x1024`);
 }
 
-copyFileSync(source, join(process.env.MAKEFUN_OUTPUT_DIR ?? '/output', 'entry.png'));
+const destination = join(process.env.MAKEFUN_OUTPUT_DIR ?? '/output', 'entry.png');
+if (decoded !== null) {
+  writeFileSync(destination, decoded);
+} else {
+  copyFileSync(source, destination);
+}
